@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 /**
- * sipgate Channel Watcher
+ * sipgate Channel Watcher — macOS + Windows
  *
- * Connects to the sipgate Electron app via Chrome Remote Debugging Protocol
- * and enforces that "Hotline" is always the active channel.
- *
- * If sipgate is running WITHOUT the debug port (e.g. started via Dock),
- * it will automatically restart it with --remote-debugging-port=9222.
+ * Enforces "Hotline" channel via Chrome DevTools Protocol (CDP).
+ * If sipgate is running WITHOUT the debug port (e.g. started via Dock/Taskbar),
+ * it automatically restarts it with --remote-debugging-port=9222.
  */
 
 const CDP = require('chrome-remote-interface');
 const { execSync, exec } = require('child_process');
+const os = require('os');
 
 const DEBUG_PORT = 9222;
 const RETRY_INTERVAL_MS = 5000;
 const POLL_INTERVAL_MS = 1000;
+const IS_WINDOWS = os.platform() === 'win32';
 
 const INJECTED_WATCHER_SCRIPT = `
 (function() {
@@ -51,7 +51,7 @@ const INJECTED_WATCHER_SCRIPT = `
 })();
 `;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── OS-spezifische Helpers ────────────────────────────────────────────────────
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -59,17 +59,49 @@ function sleep(ms) {
 
 function isSipgateRunning() {
   try {
-    execSync('pgrep -x sipgate', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
+    if (IS_WINDOWS) {
+      const out = execSync('tasklist /FI "IMAGENAME eq sipgate.exe" /NH', { encoding: 'utf8' });
+      return out.toLowerCase().includes('sipgate.exe');
+    } else {
+      execSync('pgrep -x sipgate', { stdio: 'ignore' });
+      return true;
+    }
+  } catch { return false; }
+}
+
+function killSipgate() {
+  try {
+    if (IS_WINDOWS) {
+      execSync('taskkill /F /IM sipgate.exe', { stdio: 'ignore' });
+    } else {
+      execSync('pkill -x sipgate', { stdio: 'ignore' });
+    }
+  } catch {}
+}
+
+function launchSipgate() {
+  if (IS_WINDOWS) {
+    // Typische Installationspfade auf Windows
+    const paths = [
+      `${process.env.LOCALAPPDATA}\\sipgate\\sipgate.exe`,
+      `${process.env.PROGRAMFILES}\\sipgate\\sipgate.exe`,
+      `${process.env['PROGRAMFILES(X86)']}\\sipgate\\sipgate.exe`,
+    ];
+    const exePath = paths.find(p => {
+      try { require('fs').accessSync(p); return true; } catch { return false; }
+    });
+    if (exePath) {
+      exec(`"${exePath}" --remote-debugging-port=${DEBUG_PORT}`);
+    } else {
+      // Fallback: über Shell starten
+      exec(`start "" sipgate --remote-debugging-port=${DEBUG_PORT}`);
+    }
+  } else {
+    exec(`open -a sipgate --args --remote-debugging-port=${DEBUG_PORT}`);
   }
 }
 
-function restartSipgateWithDebugPort() {
-  console.log('[Hotline-Watcher] sipgate läuft ohne Debug-Port — starte neu...');
-  try { execSync('pkill -x sipgate', { stdio: 'ignore' }); } catch {}
-}
+// ── CDP Helpers ───────────────────────────────────────────────────────────────
 
 async function getSipgateTarget() {
   const http = require('http');
@@ -81,8 +113,7 @@ async function getSipgateTarget() {
         try {
           const targets = JSON.parse(data);
           const target = targets.find(t =>
-            t.type === 'page' &&
-            !t.url.startsWith('devtools://')
+            t.type === 'page' && !t.url.startsWith('devtools://')
           );
           if (target) resolve(target);
           else reject(new Error('No page target found'));
@@ -104,13 +135,14 @@ async function connectAndWatch() {
   try {
     target = await getSipgateTarget();
   } catch {
-    // Port 9222 not reachable — check if sipgate is running WITHOUT debug port
+    // Port 9222 nicht erreichbar — läuft sipgate ohne Debug-Port?
     if (!restarting && isSipgateRunning()) {
       restarting = true;
-      restartSipgateWithDebugPort();
+      console.log('[Hotline-Watcher] sipgate läuft ohne Debug-Port — starte neu...');
+      killSipgate();
       await sleep(2000);
-      exec('open -a sipgate --args --remote-debugging-port=9222');
-      console.log('[Hotline-Watcher] sipgate neu gestartet mit Debug-Port. Warte...');
+      launchSipgate();
+      console.log('[Hotline-Watcher] sipgate neu gestartet. Warte...');
       await sleep(5000);
       restarting = false;
     } else if (!isConnected && !restarting) {
@@ -138,11 +170,9 @@ async function connectAndWatch() {
     });
 
     const val = result?.result?.value;
-    if (val === 'already_running') {
-      console.log('[Hotline-Watcher] Skript läuft bereits.');
-    } else {
-      console.log('[Hotline-Watcher] Monitoring aktiv.');
-    }
+    console.log(val === 'already_running'
+      ? '[Hotline-Watcher] Skript läuft bereits.'
+      : '[Hotline-Watcher] Monitoring aktiv.');
 
     Page.loadEventFired(async () => {
       console.log('[Hotline-Watcher] Seite neu geladen — re-inject...');
@@ -163,5 +193,5 @@ async function connectAndWatch() {
   }
 }
 
-console.log('[Hotline-Watcher] Gestartet. Warte auf sipgate...');
+console.log(`[Hotline-Watcher] Gestartet auf ${IS_WINDOWS ? 'Windows' : 'macOS'}. Warte auf sipgate...`);
 connectAndWatch();
