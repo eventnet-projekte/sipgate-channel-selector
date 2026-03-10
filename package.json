@@ -1,0 +1,13 @@
+{
+  "name": "sipgate-channel-selector",
+  "version": "1.0.0",
+  "description": "Enforces 'Hotline' channel in sipgate desktop app via Electron remote debugging",
+  "main": "watcher.js",
+  "scripts": {
+    "start": "node watcher.js",
+    "launch": "bash start.sh"
+  },
+  "dependencies": {
+    "chrome-remote-interface": "^0.33.2"
+  }
+}
