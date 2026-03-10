@@ -274,7 +274,9 @@ chmod +x "$INSTALL_DIR/uninstall.sh"
 echo ""
 echo "▶ Installiere Abhängigkeiten..."
 cd "$INSTALL_DIR"
-PATH="$(dirname "$NODE_BIN"):$PATH" "$NPM_BIN" install --omit=dev --silent
+# npm-cli.js direkt mit unserem Node aufrufen — umgeht PATH-Probleme
+NPM_CLI="$(dirname "$NODE_BIN")/../lib/node_modules/npm/bin/npm-cli.js"
+"$NODE_BIN" "$NPM_CLI" install --omit=dev --silent
 echo "  ✓ Fertig"
 
 # ── 4. start.sh generieren (Pfade werden hier zur Installationszeit eingesetzt) ──
