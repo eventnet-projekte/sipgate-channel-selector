@@ -4,7 +4,7 @@
 # =============================================================================
 # Einmaliger Install-Befehl für Kollegen:
 #
-#   curl -fsSL https://raw.githubusercontent.com/eventnet-projekte/sipgate-hotline-watcher/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/eventnet-projekte/sipgate-channel-selector/main/install.sh | bash
 #
 # Update: gleichen Befehl nochmal ausführen
 # Deinstallieren: bash uninstall.sh (liegt in ~/Library/Application Support/SipgateHotlineWatcher/)
@@ -82,10 +82,14 @@ cat > "$INSTALL_DIR/watcher.js" << 'WATCHER_EOF'
 #!/usr/bin/env node
 /**
  * sipgate Channel Watcher
+ *
  * Enforces "Hotline" channel via Chrome DevTools Protocol (CDP).
+ * If sipgate is running WITHOUT the debug port (e.g. started via Dock),
+ * it automatically restarts it with --remote-debugging-port=9222.
  */
 
 const CDP = require('chrome-remote-interface');
+const { execSync, exec } = require('child_process');
 
 const DEBUG_PORT = 9222;
 const RETRY_INTERVAL_MS = 5000;
@@ -97,7 +101,8 @@ const INJECTED_WATCHER_SCRIPT = `
   window.__hotlineWatcherActive = true;
 
   function enforceHotline() {
-    // document.title is the most robust indicator — unaffected by CSS refactoring
+    // document.title is the most robust indicator: "Hotline - sipgate App"
+    // It's a semantic property, unaffected by CSS refactoring or build hashes.
     if (document.title.startsWith('Hotline')) return;
 
     const hotline = document.querySelector('[aria-label="Hotline"]');
@@ -125,7 +130,16 @@ const INJECTED_WATCHER_SCRIPT = `
 })();
 `;
 
-let isConnected = false;
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isSipgateRunning() {
+  try {
+    execSync('pgrep -x sipgate', { stdio: 'ignore' });
+    return true;
+  } catch { return false; }
+}
 
 async function getSipgateTarget() {
   const http = require('http');
@@ -137,8 +151,7 @@ async function getSipgateTarget() {
         try {
           const targets = JSON.parse(data);
           const target = targets.find(t =>
-            t.type === 'page' &&
-            !t.url.startsWith('devtools://')
+            t.type === 'page' && !t.url.startsWith('devtools://')
           );
           if (target) resolve(target);
           else reject(new Error('No page target found'));
@@ -150,18 +163,33 @@ async function getSipgateTarget() {
   });
 }
 
+let isConnected = false;
+let restarting = false;
+
 async function connectAndWatch() {
   let target;
   try {
     target = await getSipgateTarget();
   } catch {
-    if (!isConnected) process.stdout.write('.');
+    // Port 9222 nicht erreichbar — läuft sipgate ohne Debug-Port?
+    if (!restarting && isSipgateRunning()) {
+      restarting = true;
+      console.log('[Hotline-Watcher] sipgate läuft ohne Debug-Port — starte neu...');
+      try { execSync('pkill -x sipgate', { stdio: 'ignore' }); } catch {}
+      await sleep(2000);
+      exec('open -a sipgate --args --remote-debugging-port=9222');
+      console.log('[Hotline-Watcher] sipgate neu gestartet. Warte...');
+      await sleep(5000);
+      restarting = false;
+    } else if (!isConnected && !restarting) {
+      process.stdout.write('.');
+    }
     setTimeout(connectAndWatch, RETRY_INTERVAL_MS);
     return;
   }
 
   if (!isConnected) {
-    console.log(`\n[Hotline-Watcher] Connected (${target.title || target.url})`);
+    console.log(`\n[Hotline-Watcher] Verbunden (${target.title || target.url})`);
     isConnected = true;
   }
 
@@ -178,32 +206,30 @@ async function connectAndWatch() {
     });
 
     const val = result?.result?.value;
-    if (val === 'already_running') {
-      console.log('[Hotline-Watcher] Already running.');
-    } else {
-      console.log('[Hotline-Watcher] Monitoring...');
-    }
+    console.log(val === 'already_running'
+      ? '[Hotline-Watcher] Skript läuft bereits.'
+      : '[Hotline-Watcher] Monitoring aktiv.');
 
     Page.loadEventFired(async () => {
-      console.log('[Hotline-Watcher] Page reloaded — re-injecting...');
+      console.log('[Hotline-Watcher] Seite neu geladen — re-inject...');
       await Runtime.evaluate({ expression: INJECTED_WATCHER_SCRIPT, returnByValue: true });
     });
 
     client.on('disconnect', () => {
-      console.log('[Hotline-Watcher] Disconnected. Retrying...');
+      console.log('[Hotline-Watcher] Verbindung getrennt. Erneut versuchen...');
       isConnected = false;
       setTimeout(connectAndWatch, RETRY_INTERVAL_MS);
     });
 
   } catch (err) {
-    console.error('[Hotline-Watcher] Error:', err.message);
+    console.error('[Hotline-Watcher] Fehler:', err.message);
     if (client) await client.close().catch(() => {});
     isConnected = false;
     setTimeout(connectAndWatch, RETRY_INTERVAL_MS);
   }
 }
 
-console.log('[Hotline-Watcher] Starting...');
+console.log('[Hotline-Watcher] Gestartet. Warte auf sipgate...');
 connectAndWatch();
 WATCHER_EOF
 
@@ -251,17 +277,9 @@ echo "  ✓ Fertig"
 # ── 4. start.sh generieren ────────────────────────────────────────────────────
 cat > "$INSTALL_DIR/start.sh" << STARTSCRIPT_EOF
 #!/bin/bash
-NODE_BIN="$NODE_BIN"
-INSTALL_DIR="$INSTALL_DIR"
-
-if ! curl -s --max-time 1 http://localhost:9222/json > /dev/null 2>&1; then
-    pkill -f "sipgate" 2>/dev/null || true
-    sleep 2
-    open -a "/Applications/sipgate.app" --args --remote-debugging-port=9222
-    sleep 4
-fi
-
-exec "\$NODE_BIN" "\$INSTALL_DIR/watcher.js"
+# Startet den Watcher — der Watcher kümmert sich selbst darum,
+# sipgate mit dem richtigen Debug-Port zu starten.
+exec "$NODE_BIN" "$INSTALL_DIR/watcher.js"
 STARTSCRIPT_EOF
 chmod +x "$INSTALL_DIR/start.sh"
 
