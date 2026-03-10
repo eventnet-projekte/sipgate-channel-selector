@@ -7,12 +7,12 @@
 #   curl -fsSL https://raw.githubusercontent.com/eventnet-projekte/sipgate-channel-selector/main/install.sh | bash
 #
 # Update: gleichen Befehl nochmal ausführen
-# Deinstallieren: bash uninstall.sh (liegt in ~/Library/Application Support/SipgateHotlineWatcher/)
+# Deinstallieren: bash ~/.sipgate-channel-selector/uninstall.sh
 # =============================================================================
 
 set -e
 
-INSTALL_DIR="$HOME/Library/Application Support/SipgateHotlineWatcher"
+INSTALL_DIR="$HOME/.sipgate-channel-selector"
 PLIST_NAME="com.eventnet.sipgate-hotline-watcher"
 PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
 
@@ -27,10 +27,9 @@ echo "▶ Prüfe Node.js..."
 
 NODE_BIN=""
 for candidate in \
-    "$(which node 2>/dev/null)" \
     "/usr/local/bin/node" \
     "/opt/homebrew/bin/node" \
-    "$HOME/Library/Application Support/SipgateHotlineWatcher/node/bin/node" \
+    "$HOME/.sipgate-channel-selector/node/bin/node" \
     "$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node 2>/dev/null | tail -1)/bin/node"
 do
     if [ -x "$candidate" ]; then
@@ -38,6 +37,11 @@ do
         break
     fi
 done
+
+# Falls noch nicht gefunden: which node versuchen
+if [ -z "$NODE_BIN" ] && which node &>/dev/null; then
+    NODE_BIN="$(which node)"
+fi
 
 if [ -z "$NODE_BIN" ]; then
     echo "  Node.js nicht gefunden — wird jetzt installiert (ca. 30 MB)..."
@@ -56,17 +60,16 @@ if [ -z "$NODE_BIN" ]; then
         | tar -xz -C "$NODE_INSTALL_DIR" --strip-components=1
 
     NODE_BIN="$NODE_INSTALL_DIR/bin/node"
-    echo "  ✓ Node.js $($NODE_BIN --version) installiert"
+    echo "  ✓ Node.js $("$NODE_BIN" --version) installiert"
 else
-    echo "  ✓ Node.js gefunden: $($NODE_BIN --version)"
+    echo "  ✓ Node.js gefunden: $("$NODE_BIN" --version) ($NODE_BIN)"
 fi
 
 NPM_BIN="$(dirname "$NODE_BIN")/npm"
 
 # ── 2. Watcher-Dateien schreiben ──────────────────────────────────────────────
 echo ""
-echo "▶ Installiere Dateien nach:"
-echo "  $INSTALL_DIR"
+echo "▶ Installiere Dateien nach: $INSTALL_DIR"
 
 # Stoppe laufenden Watcher vor dem Update
 if launchctl list 2>/dev/null | grep -q "$PLIST_NAME"; then
@@ -236,7 +239,7 @@ WATCHER_EOF
 # ── package.json (eingebettet) ────────────────────────────────────────────────
 cat > "$INSTALL_DIR/package.json" << 'PKG_EOF'
 {
-  "name": "sipgate-hotline-watcher",
+  "name": "sipgate-channel-selector",
   "version": "1.0.0",
   "main": "watcher.js",
   "dependencies": {
@@ -245,21 +248,21 @@ cat > "$INSTALL_DIR/package.json" << 'PKG_EOF'
 }
 PKG_EOF
 
-# ── uninstall.sh (eingebettet, für späteren Bedarf) ───────────────────────────
-cat > "$INSTALL_DIR/uninstall.sh" << UNINSTALL_EOF
+# ── uninstall.sh (eingebettet) ────────────────────────────────────────────────
+cat > "$INSTALL_DIR/uninstall.sh" << 'UNINSTALL_EOF'
 #!/bin/bash
 PLIST_NAME="com.eventnet.sipgate-hotline-watcher"
-PLIST_PATH="\$HOME/Library/LaunchAgents/\$PLIST_NAME.plist"
-INSTALL_DIR="\$HOME/Library/Application Support/SipgateHotlineWatcher"
+PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
+INSTALL_DIR="$HOME/.sipgate-channel-selector"
 
 echo "▶ Stoppe Watcher..."
-launchctl unload "\$PLIST_PATH" 2>/dev/null || true
+launchctl unload "$PLIST_PATH" 2>/dev/null || true
 echo "▶ Entferne Autostart..."
-rm -f "\$PLIST_PATH"
+rm -f "$PLIST_PATH"
 echo "▶ Entferne Dateien..."
-rm -rf "\$INSTALL_DIR"
+rm -rf "$INSTALL_DIR"
 echo "▶ Starte sipgate normal neu..."
-pkill -f "sipgate" 2>/dev/null || true
+pkill -x sipgate 2>/dev/null || true
 sleep 1
 open -a "/Applications/sipgate.app"
 echo ""
@@ -274,7 +277,7 @@ cd "$INSTALL_DIR"
 "$NPM_BIN" install --omit=dev --silent
 echo "  ✓ Fertig"
 
-# ── 4. start.sh generieren ────────────────────────────────────────────────────
+# ── 4. start.sh generieren (Pfade werden hier zur Installationszeit eingesetzt) ──
 cat > "$INSTALL_DIR/start.sh" << STARTSCRIPT_EOF
 #!/bin/bash
 # Startet den Watcher — der Watcher kümmert sich selbst darum,
@@ -332,5 +335,5 @@ echo "  Watcher läuft im Hintergrund."
 echo "  sipgate wird automatisch auf 'Hotline' gehalten."
 echo ""
 echo "  Logs:           tail -f /tmp/sipgate-hotline-watcher.log"
-echo "  Deinstallieren: bash ~/Library/Application\ Support/SipgateHotlineWatcher/uninstall.sh"
+echo "  Deinstallieren: bash ~/.sipgate-channel-selector/uninstall.sh"
 echo ""
