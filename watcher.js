@@ -30,7 +30,7 @@ const INJECTED_WATCHER_SCRIPT = `
     if (!hotline) return; // App not fully loaded yet
 
     console.log('[Hotline-Watcher] Switching to Hotline (was: ' + document.title + ')');
-    hotline.click();
+    hotline.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   }
 
   enforceHotline();
@@ -83,6 +83,7 @@ function launchSipgate() {
   if (IS_WINDOWS) {
     // Typische Installationspfade auf Windows
     const paths = [
+      `${process.env.LOCALAPPDATA}\\Programs\\sipgate-desktop\\sipgate.exe`,
       `${process.env.LOCALAPPDATA}\\sipgate\\sipgate.exe`,
       `${process.env.PROGRAMFILES}\\sipgate\\sipgate.exe`,
       `${process.env['PROGRAMFILES(X86)']}\\sipgate\\sipgate.exe`,

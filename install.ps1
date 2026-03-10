@@ -124,7 +124,7 @@ const INJECTED_WATCHER_SCRIPT = `
     const hotline = document.querySelector('[aria-label="Hotline"]');
     if (!hotline) return;
     console.log('[Hotline-Watcher] Switching to Hotline (was: ' + document.title + ')');
-    hotline.click();
+    hotline.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   }
 
   enforceHotline();
@@ -165,6 +165,7 @@ function launchSipgate() {
   if (IS_WINDOWS) {
     const fs = require('fs');
     const paths = [
+      `${process.env.LOCALAPPDATA}\\Programs\\sipgate-desktop\\sipgate.exe`,
       `${process.env.LOCALAPPDATA}\\sipgate\\sipgate.exe`,
       `${process.env.PROGRAMFILES}\\sipgate\\sipgate.exe`,
       `${process.env['PROGRAMFILES(X86)']}\\sipgate\\sipgate.exe`,
@@ -277,7 +278,7 @@ Write-Host "  ✓ Fertig"
 @"
 # Startet den Watcher
 Start-Process -WindowStyle Hidden -FilePath "$NODE_BIN" -ArgumentList "$INSTALL_DIR\watcher.js" ``
-    -RedirectStandardOutput "$LOG_FILE" -RedirectStandardError "$LOG_FILE"
+    -RedirectStandardOutput "$LOG_FILE" -RedirectStandardError "$LOG_FILE.err"
 "@ | Set-Content -Path "$INSTALL_DIR\start.ps1" -Encoding UTF8
 
 # ── uninstall.ps1 (eingebettet) ───────────────────────────────────────────────
