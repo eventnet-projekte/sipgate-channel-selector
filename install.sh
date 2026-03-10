@@ -274,7 +274,7 @@ chmod +x "$INSTALL_DIR/uninstall.sh"
 echo ""
 echo "▶ Installiere Abhängigkeiten..."
 cd "$INSTALL_DIR"
-"$NPM_BIN" install --omit=dev --silent
+PATH="$(dirname "$NODE_BIN"):$PATH" "$NPM_BIN" install --omit=dev --silent
 echo "  ✓ Fertig"
 
 # ── 4. start.sh generieren (Pfade werden hier zur Installationszeit eingesetzt) ──
